@@ -154,7 +154,8 @@ class Assignment3VPN:
                     # Disabling the button to prevent repeated clicks
                     self.secureButton["state"] = "disabled"
                     # Processing the protocol message
-                    self.prtcl.ProcessReceivedProtocolMessage(cipher_text)
+                    message = self.prtcl.ProcessReceivedProtocolMessage(cipher_text, self.sharedSecret.get())
+                    self._SendBytes(message)
 
                 # Otherwise, decrypting and showing the messaage
                 else:
@@ -165,6 +166,9 @@ class Assignment3VPN:
                 self._AppendLog("RECEIVER_THREAD: Error receiving data: {}".format(str(e)))
                 return False
 
+
+    def _SendBytes(self, stream):
+        self.conn.send(stream)
 
     # Send data to the other party
     def _SendMessage(self, message):
