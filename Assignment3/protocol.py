@@ -37,13 +37,22 @@ class Protocol:
     def IsMessagePartOfProtocol(self, message):
         return message.startswith(b"PROTOCOL")
 
+    def generate_message_to_encrypt(self, isServer, response, session_key):
+        padder = padding.PKCS7(128).padder()
+        if isServer:
+            data = b"SERVER" + self.delimiter + response + self.delimiter + session_key
+        else:
+            data = b"CLIENT" + self.delimiter + response + self.delimiter + session_key
+        padded_data = padder.update(data) + padder.finalize()
+        return padded_data
+
     # Processing protocol message
     # TODO: IMPLMENET THE LOGIC (CALL SetSessionKey ONCE YOU HAVE THE KEY ESTABLISHED)
     # THROW EXCEPTION IF AUTHENTICATION FAILS
     def ProcessReceivedProtocolMessage(self, message, key):
-        msg = message.split(self.delimiter)
+        msg = message.split(self.delimiter, 2)
+        print("The message is", msg)
         stage = msg[0]
-        padder = padding.PKCS7(128).padder()
         unpadder = padding.PKCS7(128).unpadder()
 
         ckdf = ConcatKDFHash(algorithm=hashes.SHA256(), length=32, otherinfo=None)
@@ -56,36 +65,34 @@ class Protocol:
 
             response = self.get_nonce(msg)
             session_key = self.generate_key().encode()
+            data = self.generate_message_to_encrypt(True, response, session_key)
             self.SetSessionKey(session_key)
-            data = b"SERVER" + self.delimiter + response + self.delimiter + session_key
-            padded_data = padder.update(data) + padder.finalize()
             encryptor = cipher.encryptor()
-            ct = encryptor.update(padded_data) + encryptor.finalize()
+            ct = encryptor.update(data) + encryptor.finalize()
             challenge = self.generate_nonce().encode()
             self.SetNonce(challenge)
-            result = b"PROTOCOL_AUTH_SERVER_CHALLENGE" + self.delimiter + ct + self.delimiter + challenge
+            result = b"PROTOCOL_AUTH_SERVER_CHALLENGE" + self.delimiter + challenge + self.delimiter + ct
         elif stage == b"PROTOCOL_INIT_SERVER":
             print("PROTOCOL_INIT_SERVER")
 
             response = self.get_nonce(msg)
             session_key = self.generate_key().encode()
+            data = self.generate_message_to_encrypt(False, response, session_key)
             self.SetSessionKey(session_key)
-            data = b"CLIENT" + self.delimiter + response + self.delimiter + session_key
-            padded_data = padder.update(data) + padder.finalize()
             encryptor = cipher.encryptor()
-            ct = encryptor.update(padded_data) + encryptor.finalize()
+            ct = encryptor.update(data) + encryptor.finalize()
             challenge = self.generate_nonce().encode()
             self.SetNonce(challenge)
-            result = b"PROTOCOL_AUTH_CLIENT_CHALLENGE" + self.delimiter + ct + self.delimiter + challenge
+            result = b"PROTOCOL_AUTH_CLIENT_CHALLENGE" + self.delimiter + challenge + self.delimiter + ct
         elif stage == b"PROTOCOL_AUTH_SERVER_CHALLENGE":
             print("PROTOCOL_AUTH_SERVER_CHALLENGE")
 
-            ct = msg[1]
+            ct = self.get_cipher_text(msg)
             decryptor = cipher.decryptor()
             padded_data = decryptor.update(ct) + decryptor.finalize()
             try:
                 data = unpadder.update(padded_data) + unpadder.finalize()
-                data = data.split(self.delimiter)
+                data = data.split(self.delimiter, 2)
                 if data[0] == b"SERVER" and data[1] == self._nonce:
                     session_key = data[2]
                     self.SetSessionKey(session_key)
@@ -93,20 +100,19 @@ class Protocol:
                 raise Exception("Authentication fails")
                 
             response = self.get_nonce(msg)
-            data = b"CLIENT" + self.delimiter + response + self.delimiter + session_key 
-            padded_data = padder.update(data) + padder.finalize()
+            data = self.generate_message_to_encrypt(False, response, session_key)
             encryptor = cipher.encryptor()
-            ct = encryptor.update(padded_data) + encryptor.finalize()
+            ct = encryptor.update(data) + encryptor.finalize()
             result = b"PROTOCOL_AUTH_CLIENT" + self.delimiter + ct
         elif stage == b"PROTOCOL_AUTH_CLIENT_CHALLENGE":
             print("PROTOCOL_AUTH_CLIENT_CHALLENGE")
 
-            ct = msg[1]
+            ct = self.get_cipher_text(msg)
             decryptor = cipher.decryptor()
             padded_data = decryptor.update(ct) + decryptor.finalize()
             try:
                 data = unpadder.update(padded_data) + unpadder.finalize()
-                data = data.split(self.delimiter)
+                data = data.split(self.delimiter, 2)
                 if data[0] == b"CLIENT" and data[1] == self._nonce:
                     session_key = data[2]
                     self.SetSessionKey(session_key)
@@ -114,19 +120,18 @@ class Protocol:
                 raise Exception("Authentication fails")
 
             response = self.get_nonce(msg)
-            data = b"SERVER" + self.delimiter + response + self.delimiter + session_key 
-            padded_data = padder.update(data) + padder.finalize()
+            data = self.generate_message_to_encrypt(True, response, session_key)
             encryptor = cipher.encryptor()
-            ct = encryptor.update(padded_data) + encryptor.finalize()
+            ct = encryptor.update(data) + encryptor.finalize()
             result = b"PROTOCOL_AUTH_SERVER" + self.delimiter + ct
         elif stage == b"PROTOCOL_AUTH_SERVER":
             print("PROTOCOL_AUTH_SERVER")
 
-            ct = msg[1]
+            ct = self.get_cipher_text(msg)
             decryptor = cipher.decryptor()
             padded_data = decryptor.update(ct) + decryptor.finalize()
             data = unpadder.update(padded_data) + unpadder.finalize()
-            data = data.split(self.delimiter)
+            data = data.split(self.delimiter, 2)
             if data[0] == b"SERVER" and data[1] == self._nonce:
                 session_key = data[2]
                 assert(self._key == session_key)
@@ -136,11 +141,11 @@ class Protocol:
         elif stage == b"PROTOCOL_AUTH_CLIENT":
             print("PROTOCOL_AUTH_CLIENT")
 
-            ct = msg[1]
+            ct = self.get_cipher_text(msg)
             decryptor = cipher.decryptor()
             padded_data = decryptor.update(ct) + decryptor.finalize()
             data = unpadder.update(padded_data) + unpadder.finalize()
-            data = data.split(self.delimiter)
+            data = data.split(self.delimiter, 2)
             if data[0] == b"CLIENT" and data[1] == self._nonce:
                 session_key = data[2]
                 assert(self._key == session_key)
@@ -151,9 +156,17 @@ class Protocol:
         print("The result is", result)
         return result
 
-    # We append the nonce to the end of the message
+    # The cipher text is always the third element
+    def get_cipher_text(self, message):
+        return message[2]
+
+    # The nonce is always the second element
     def get_nonce(self, message):
-        return message[-1]
+        return message[1]
+
+    # The header is always the first element
+    def get_header(self, message):
+        return message[0]
 
     # Setting the key for the current session
     # TODO: MODIFY AS YOU SEEM FIT
