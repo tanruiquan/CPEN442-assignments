@@ -24,10 +24,10 @@ class Protocol:
 
     # Creating the initial message of your protocol (to be send to the other party to bootstrap the protocol)
     # TODO: IMPLEMENT THE LOGIC (MODIFY THE INPUT ARGUMENTS AS YOU SEEM FIT)
-    def GetProtocolInitiationMessage(self, isServer):
+    def GetProtocolInitiationMessage(self, is_server):
         challenge = self.generate_nonce()
         self.SetNonce(challenge.encode())
-        if isServer:
+        if is_server:
             return "PROTOCOL_INIT_SERVER|" + challenge
         return "PROTOCOL_INIT_CLIENT|" + challenge
 
@@ -37,9 +37,9 @@ class Protocol:
     def IsMessagePartOfProtocol(self, message):
         return message.startswith(b"PROTOCOL")
 
-    def generate_message_to_encrypt(self, isServer, response, session_key):
+    def generate_message_to_encrypt(self, is_server, response, session_key):
         padder = padding.PKCS7(128).padder()
-        if isServer:
+        if is_server:
             data = b"SERVER" + self.delimiter + response + self.delimiter + session_key
         else:
             data = b"CLIENT" + self.delimiter + response + self.delimiter + session_key
@@ -49,10 +49,9 @@ class Protocol:
     # Processing protocol message
     # TODO: IMPLMENET THE LOGIC (CALL SetSessionKey ONCE YOU HAVE THE KEY ESTABLISHED)
     # THROW EXCEPTION IF AUTHENTICATION FAILS
-    def ProcessReceivedProtocolMessage(self, message, key):
+    def ProcessReceivedProtocolMessage(self, message, key, is_server):
         msg = message.split(self.delimiter, 2)
-        print("The message is", msg)
-        stage = msg[0]
+        header = self.get_header(msg)
         unpadder = padding.PKCS7(128).unpadder()
 
         ckdf = ConcatKDFHash(algorithm=hashes.SHA256(), length=32, otherinfo=None)
@@ -60,7 +59,7 @@ class Protocol:
         cipher = Cipher(algorithms.AES(key), modes.ECB())
 
         result = b""
-        if stage == b"PROTOCOL_INIT_CLIENT":
+        if header == b"PROTOCOL_INIT_CLIENT":
             print("PROTOCOL_INIT_CLIENT")
 
             response = self.get_nonce(msg)
@@ -72,7 +71,7 @@ class Protocol:
             challenge = self.generate_nonce().encode()
             self.SetNonce(challenge)
             result = b"PROTOCOL_AUTH_SERVER_CHALLENGE" + self.delimiter + challenge + self.delimiter + ct
-        elif stage == b"PROTOCOL_INIT_SERVER":
+        elif header == b"PROTOCOL_INIT_SERVER":
             print("PROTOCOL_INIT_SERVER")
 
             response = self.get_nonce(msg)
@@ -84,7 +83,7 @@ class Protocol:
             challenge = self.generate_nonce().encode()
             self.SetNonce(challenge)
             result = b"PROTOCOL_AUTH_CLIENT_CHALLENGE" + self.delimiter + challenge + self.delimiter + ct
-        elif stage == b"PROTOCOL_AUTH_SERVER_CHALLENGE":
+        elif header == b"PROTOCOL_AUTH_SERVER_CHALLENGE":
             print("PROTOCOL_AUTH_SERVER_CHALLENGE")
 
             ct = self.get_cipher_text(msg)
@@ -104,7 +103,7 @@ class Protocol:
             encryptor = cipher.encryptor()
             ct = encryptor.update(data) + encryptor.finalize()
             result = b"PROTOCOL_AUTH_CLIENT" + self.delimiter + ct
-        elif stage == b"PROTOCOL_AUTH_CLIENT_CHALLENGE":
+        elif header == b"PROTOCOL_AUTH_CLIENT_CHALLENGE":
             print("PROTOCOL_AUTH_CLIENT_CHALLENGE")
 
             ct = self.get_cipher_text(msg)
@@ -124,7 +123,7 @@ class Protocol:
             encryptor = cipher.encryptor()
             ct = encryptor.update(data) + encryptor.finalize()
             result = b"PROTOCOL_AUTH_SERVER" + self.delimiter + ct
-        elif stage == b"PROTOCOL_AUTH_SERVER":
+        elif header == b"PROTOCOL_AUTH_SERVER":
             print("PROTOCOL_AUTH_SERVER")
 
             ct = self.get_cipher_text(msg)
@@ -138,9 +137,8 @@ class Protocol:
             else:
                 raise Exception("Authentication fails")
             result = b"PROTOCOL_END"
-        elif stage == b"PROTOCOL_AUTH_CLIENT":
+        elif header == b"PROTOCOL_AUTH_CLIENT":
             print("PROTOCOL_AUTH_CLIENT")
-
             ct = self.get_cipher_text(msg)
             decryptor = cipher.decryptor()
             padded_data = decryptor.update(ct) + decryptor.finalize()
@@ -156,9 +154,9 @@ class Protocol:
         print("The result is", result)
         return result
 
-    # The cipher text is always the third element
+    # The cipher text is always the last element
     def get_cipher_text(self, message):
-        return message[2]
+        return message[-1]
 
     # The nonce is always the second element
     def get_nonce(self, message):
