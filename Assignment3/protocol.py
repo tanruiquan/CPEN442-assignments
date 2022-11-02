@@ -116,8 +116,10 @@ class Protocol:
             handshake_message = b"PROTOCOL SERVER RESPONSE 2" + self.nonce_B + encrypted_nonce_session_key
             return handshake_message
         elif message.startswith(b"PROTOCOL SERVER RESPONSE"):
+            print('HI')
             header_length = len("PROTOCOL SERVER RESPONSE")
             length_of_nonce_B = len(self.nonce_B.decode())
+            print("nonce_b is: " + self.nonce_B.decode())
 
             message_string = message.decode()
             encMessage = message_string[(header_length + length_of_nonce_B):]
