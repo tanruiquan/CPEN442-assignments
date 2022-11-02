@@ -1,4 +1,5 @@
 import secrets
+from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding, hashes
 from cryptography.hazmat.primitives.kdf.concatkdf import ConcatKDFHash
@@ -11,10 +12,11 @@ class Protocol:
     def __init__(self):
         self._key = None
         self._nonce = None
-        pass
+        self._cipher = None
 
-    def generate_key(self):
-        return secrets.token_urlsafe(32)
+    def generate_session_key(self):
+        key = Fernet.generate_key()
+        return key
 
     def generate_iv(self):
         return secrets.token_urlsafe(16)
@@ -63,7 +65,7 @@ class Protocol:
             print("PROTOCOL_INIT_CLIENT")
 
             response = self.get_nonce(msg)
-            session_key = self.generate_key().encode()
+            session_key = self.generate_session_key()
             data = self.generate_message_to_encrypt(True, response, session_key)
             self.SetSessionKey(session_key)
             encryptor = cipher.encryptor()
@@ -75,7 +77,7 @@ class Protocol:
             print("PROTOCOL_INIT_SERVER")
 
             response = self.get_nonce(msg)
-            session_key = self.generate_key().encode()
+            session_key = self.generate_session_key()
             data = self.generate_message_to_encrypt(False, response, session_key)
             self.SetSessionKey(session_key)
             encryptor = cipher.encryptor()
@@ -95,8 +97,9 @@ class Protocol:
                 if data[0] == b"SERVER" and data[1] == self._nonce:
                     session_key = data[2]
                     self.SetSessionKey(session_key)
+                    self.setCipher(Fernet(self._key))
             except:
-                raise Exception("Authentication fails")
+                raise Exception("Authentication failed")
                 
             response = self.get_nonce(msg)
             data = self.generate_message_to_encrypt(False, response, session_key)
@@ -115,8 +118,9 @@ class Protocol:
                 if data[0] == b"CLIENT" and data[1] == self._nonce:
                     session_key = data[2]
                     self.SetSessionKey(session_key)
+                    self.setCipher(Fernet(self._key))
             except:
-                raise Exception("Authentication fails")
+                raise Exception("Authentication failed")
 
             response = self.get_nonce(msg)
             data = self.generate_message_to_encrypt(True, response, session_key)
@@ -135,7 +139,8 @@ class Protocol:
                 session_key = data[2]
                 assert(self._key == session_key)
             else:
-                raise Exception("Authentication fails")
+                raise Exception("Authentication failed")
+            self.setCipher(Fernet(self._key))
             result = b"PROTOCOL_END"
         elif header == b"PROTOCOL_AUTH_CLIENT":
             print("PROTOCOL_AUTH_CLIENT")
@@ -148,9 +153,9 @@ class Protocol:
                 session_key = data[2]
                 assert(self._key == session_key)
             else:
-                raise Exception("Authentication fails")
+                raise Exception("Authentication failed")
+            self.setCipher(Fernet(self._key))
             result = b"PROTOCOL_END"
-
         print("The result is", result)
         return result
 
@@ -170,20 +175,30 @@ class Protocol:
     # TODO: MODIFY AS YOU SEEM FIT
     def SetSessionKey(self, key):
         self._key = key
-        pass
 
     # Setting the nonce for mutual authentication
     def SetNonce(self, nonce):
         self._nonce = nonce
-        pass
+
+    # Setting the cipher for encrypting and decrypting message
+    def setCipher(self, cipher):
+        self._cipher = cipher
 
 
     # Encrypting messages
     # TODO: IMPLEMENT ENCRYPTION WITH THE SESSION KEY (ALSO INCLUDE ANY NECESSARY INFO IN THE ENCRYPTED MESSAGE FOR INTEGRITY PROTECTION)
     # RETURN AN ERROR MESSAGE IF INTEGRITY VERITIFCATION OR AUTHENTICATION FAILS
     def EncryptAndProtectMessage(self, plain_text):
-        cipher_text = plain_text
-        print("My key is ", self._key)
+        print("The plain text is ", plain_text)
+        if self._cipher == None:
+            return plain_text.encode()
+            
+        try:
+            cipher_text = self._cipher.encrypt(plain_text.encode())
+        except InvalidToken:
+            raise Exception("The integrity of the message has been compromised")
+    
+        print("The cipher text is ", cipher_text)
         return cipher_text
 
 
@@ -191,5 +206,14 @@ class Protocol:
     # TODO: IMPLEMENT DECRYPTION AND INTEGRITY CHECK WITH THE SESSION KEY
     # RETURN AN ERROR MESSAGE IF INTEGRITY VERITIFCATION OR AUTHENTICATION FAILS
     def DecryptAndVerifyMessage(self, cipher_text):
-        plain_text = cipher_text
+        print("The cipher text is",  cipher_text)
+        if self._cipher == None: 
+            return cipher_text
+
+        try:
+            plain_text = self._cipher.decrypt(cipher_text)
+        except InvalidToken:
+            raise Exception("The integrity of the message has been compromised")
+        
+        print("The plain text is ", plain_text)
         return plain_text
